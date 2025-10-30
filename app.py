@@ -1,18 +1,10 @@
-# Overwrite the Streamlit calculator with a more deployment‑robust version.
-# Changes:
-# 1) Removed unsupported kwargs on st.text_input (which can break on some deployments).
-# 2) Added explicit unique keys for every button (prevents any duplicate-key issues).
-# 3) Used use_container_width=True for better layout in narrow containers.
-# 4) Minor safety/UX tweaks; same SafeEval as before.
-# 5) Pinned Streamlit version in requirements for consistent behavior across hosts.
-
-app_code = r'''import streamlit as st
+import streamlit as st
 import ast
 import operator as op
 
 st.set_page_config(page_title="Streamlit Calculator", page_icon="🧮", layout="centered")
 
-# --- Safe evaluator (only arithmetic) ---
+# ---------- Safe arithmetic evaluator ----------
 ALLOWED_BIN_OPS = {
     ast.Add: op.add,
     ast.Sub: op.sub,
@@ -22,10 +14,7 @@ ALLOWED_BIN_OPS = {
     ast.Mod: op.mod,
     ast.Pow: op.pow,
 }
-ALLOWED_UNARY_OPS = {
-    ast.UAdd: op.pos,
-    ast.USub: op.neg,
-}
+ALLOWED_UNARY_OPS = {ast.UAdd: op.pos, ast.USub: op.neg}
 
 class SafeEval(ast.NodeVisitor):
     def __init__(self, max_nodes: int = 200):
@@ -46,7 +35,7 @@ class SafeEval(ast.NodeVisitor):
             return node.value
         raise ValueError("Only numbers are allowed.")
 
-    # Python <3.8 compatibility (Num nodes)
+    # Py<3.8 compatibility (Num nodes)
     def visit_Num(self, node):
         return node.n
 
@@ -56,7 +45,6 @@ class SafeEval(ast.NodeVisitor):
         op_type = type(node.op)
         if op_type not in ALLOWED_BIN_OPS:
             raise ValueError("Operator not allowed.")
-        # Basic guard against huge exponentials
         if op_type is ast.Pow and (abs(left) > 1e6 or abs(right) > 10):
             raise ValueError("Exponent too large.")
         return ALLOWED_BIN_OPS[op_type](left, right)
@@ -80,7 +68,7 @@ def safe_eval(expr: str):
             .replace("÷", "/")
             .replace("–", "-")
             .replace("—", "-")
-            .replace("^", "**")  # allow caret for power
+            .replace("^", "**")
     )
     try:
         tree = ast.parse(normalized, mode="eval")
@@ -94,7 +82,7 @@ def safe_eval(expr: str):
     except Exception as e:
         return f"Error: {e}"
 
-# --- Session State ---
+# ---------- State ----------
 if "expr" not in st.session_state:
     st.session_state.expr = "0"
 if "history" not in st.session_state:
@@ -116,14 +104,13 @@ def evaluate():
     expr = st.session_state.expr.strip()
     result = safe_eval(expr)
     st.session_state.history.insert(0, f"{expr} = {result}")
-    st.session_state.history = st.session_state.history[:15]  # keep last 15
+    st.session_state.history = st.session_state.history[:15]
     if not str(result).startswith("Error"):
         st.session_state.expr = str(result)
 
-# --- UI ---
+# ---------- UI ----------
 st.title("🧮 Streamlit Calculator")
 
-# Input display (no unsupported kwargs)
 st.text_input(
     "Expression",
     key="expr",
@@ -135,7 +122,6 @@ st.text_input(
 left, right = st.columns([2, 1])
 
 with left:
-    # Button grid (explicit unique keys)
     rows = [
         ["7", "8", "9", "/", "AC"],
         ["4", "5", "6", "*", "⌫"],
@@ -145,8 +131,7 @@ with left:
     for r, row in enumerate(rows):
         cols = st.columns(5)
         for c, token in enumerate(row):
-            label = token
-            key = f"btn-{r}-{c}-{label}"
+            key = f"btn-{r}-{c}-{token}"
             if token == "AC":
                 if cols[c].button("AC", key=key, use_container_width=True):
                     clear()
@@ -157,10 +142,9 @@ with left:
                 if cols[c].button("=", key=key, use_container_width=True):
                     evaluate()
             else:
-                if cols[c].button(label, key=key, use_container_width=True):
+                if cols[c].button(token, key=key, use_container_width=True):
                     append_to_expr(token)
 
-    # Extra operators row
     cols = st.columns(5)
     extras = ["**", "%", "÷", "×", "//"]
     labels = ["xʸ", "%", "÷", "×", "//"]
@@ -178,18 +162,3 @@ with right:
         st.caption("No calculations yet.")
 
 st.caption("Tips: Use '^' for power (e.g., 2^10), '//' for floor division, and '%' for modulo.")
-'''
-
-requirements = """streamlit>=1.29.0
-"""
-
-# Write files
-with open("/mnt/data/app.py", "w", encoding="utf-8") as f:
-    f.write(app_code)
-
-with open("/mnt/data/requirements.txt", "w", encoding="utf-8") as f:
-    f.write(requirements)
-
-print("Updated files written:")
-print(" - /mnt/data/app.py")
-print(" - /mnt/data/requirements.txt")
