@@ -1,11 +1,18 @@
-import streamlit as st
+# Overwrite the Streamlit calculator with a more deployment‑robust version.
+# Changes:
+# 1) Removed unsupported kwargs on st.text_input (which can break on some deployments).
+# 2) Added explicit unique keys for every button (prevents any duplicate-key issues).
+# 3) Used use_container_width=True for better layout in narrow containers.
+# 4) Minor safety/UX tweaks; same SafeEval as before.
+# 5) Pinned Streamlit version in requirements for consistent behavior across hosts.
+
+app_code = r'''import streamlit as st
 import ast
 import operator as op
 
 st.set_page_config(page_title="Streamlit Calculator", page_icon="🧮", layout="centered")
 
 # --- Safe evaluator (only arithmetic) ---
-# Allowed operators
 ALLOWED_BIN_OPS = {
     ast.Add: op.add,
     ast.Sub: op.sub,
@@ -39,7 +46,7 @@ class SafeEval(ast.NodeVisitor):
             return node.value
         raise ValueError("Only numbers are allowed.")
 
-    # For Python <3.8 compatibility (Num nodes)
+    # Python <3.8 compatibility (Num nodes)
     def visit_Num(self, node):
         return node.n
 
@@ -68,7 +75,6 @@ class SafeEval(ast.NodeVisitor):
         raise ValueError("Variables are not allowed.")
 
 def safe_eval(expr: str):
-    # Normalize some common symbols
     normalized = (
         expr.replace("×", "*")
             .replace("÷", "/")
@@ -80,7 +86,6 @@ def safe_eval(expr: str):
         tree = ast.parse(normalized, mode="eval")
         evaluator = SafeEval()
         result = evaluator.visit(tree.body)
-        # Optionally round very long floats for display
         if isinstance(result, float):
             result = round(result, 12)
         return result
@@ -96,7 +101,7 @@ if "history" not in st.session_state:
     st.session_state.history = []
 
 def append_to_expr(token: str):
-    if st.session_state.expr == "0" and token not in (".", ")", "**", "%"):
+    if st.session_state.expr == "0" and token not in (".", ")", "**", "%", "//"):
         st.session_state.expr = token
     else:
         st.session_state.expr += token
@@ -112,68 +117,57 @@ def evaluate():
     result = safe_eval(expr)
     st.session_state.history.insert(0, f"{expr} = {result}")
     st.session_state.history = st.session_state.history[:15]  # keep last 15
-    st.session_state.expr = str(result) if not str(result).startswith("Error") else st.session_state.expr
+    if not str(result).startswith("Error"):
+        st.session_state.expr = str(result)
 
 # --- UI ---
 st.title("🧮 Streamlit Calculator")
 
-# Style tweaks for bigger buttons
-st.markdown(
-    """
-    <style>
-    .stButton > button {
-        width: 100%;
-        height: 3rem;
-        font-size: 1.2rem;
-    }
-    .expr-input input {
-        font-size: 1.5rem !important;
-        height: 3rem !important;
-    }
-    </style>
-    """,
-    unsafe_allow_html=True,
+# Input display (no unsupported kwargs)
+st.text_input(
+    "Expression",
+    key="expr",
+    label_visibility="collapsed",
+    placeholder="0",
+    help="Type an arithmetic expression and press = or use the buttons.",
 )
-
-# Display and keyboard input
-st.text_input("Expression", key="expr", label_visibility="collapsed", placeholder="0", help="Type an arithmetic expression and press = or Enter.", kwargs={"class":"expr-input"})
 
 left, right = st.columns([2, 1])
 
 with left:
-    # Button grid
+    # Button grid (explicit unique keys)
     rows = [
         ["7", "8", "9", "/", "AC"],
         ["4", "5", "6", "*", "⌫"],
         ["1", "2", "3", "-", "("],
         ["0", ".", "=", "+", ")"],
     ]
-    for row in rows:
+    for r, row in enumerate(rows):
         cols = st.columns(5)
-        for i, token in enumerate(row):
+        for c, token in enumerate(row):
+            label = token
+            key = f"btn-{r}-{c}-{label}"
             if token == "AC":
-                if cols[i].button("AC"):
+                if cols[c].button("AC", key=key, use_container_width=True):
                     clear()
             elif token == "⌫":
-                if cols[i].button("⌫"):
+                if cols[c].button("⌫", key=key, use_container_width=True):
                     backspace()
             elif token == "=":
-                if cols[i].button("="):
+                if cols[c].button("=", key=key, use_container_width=True):
                     evaluate()
             else:
-                if cols[i].button(token):
+                if cols[c].button(label, key=key, use_container_width=True):
                     append_to_expr(token)
 
     # Extra operators row
     cols = st.columns(5)
-    extras = ["**", "%", "÷", "×", " // "]
+    extras = ["**", "%", "÷", "×", "//"]
     labels = ["xʸ", "%", "÷", "×", "//"]
     for i, token in enumerate(extras):
-        if cols[i].button(labels[i]):
-            if token.strip() == "//":
-                append_to_expr("//")
-            else:
-                append_to_expr(token)
+        key = f"btn-extra-{i}-{token}"
+        if cols[i].button(labels[i], key=key, use_container_width=True):
+            append_to_expr("//" if token == "//" else token)
 
 with right:
     st.subheader("History")
@@ -183,4 +177,19 @@ with right:
     else:
         st.caption("No calculations yet.")
 
-st.caption("Tips: Type directly into the box, or use the buttons. Use '^' for power (e.g., 2^10), '//' for floor division, and '%' for modulo.")
+st.caption("Tips: Use '^' for power (e.g., 2^10), '//' for floor division, and '%' for modulo.")
+'''
+
+requirements = """streamlit>=1.29.0
+"""
+
+# Write files
+with open("/mnt/data/app.py", "w", encoding="utf-8") as f:
+    f.write(app_code)
+
+with open("/mnt/data/requirements.txt", "w", encoding="utf-8") as f:
+    f.write(requirements)
+
+print("Updated files written:")
+print(" - /mnt/data/app.py")
+print(" - /mnt/data/requirements.txt")
